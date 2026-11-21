@@ -1,14 +1,14 @@
 #!/bin/sh
-# Clones rpc-bridge at a pinned commit, applies our Proton patch and builds bridge.exe.
+# Clones rpc-bridge at a pinned commit and builds bridge.exe.
 set -eu
-REPO=https://github.com/EnderIce2/rpc-bridge
-COMMIT=6aa60772a5241c7bd1b8d38f026b2a5168e0f93c   # v1.4.1.3
+# Fork of EnderIce2/rpc-bridge v1.4.1.3 plus the Proton fix (upstream PR pending).
+REPO=https://github.com/chino/rpc-bridge
+COMMIT=6bdd258d1814b705bee03b6b3a0706f4e1f4c307   # fix/staging-check-wine-11.5
 
 work=$(mktemp -d)
 git clone --quiet "$REPO" "$work/rpc-bridge"
 cd "$work/rpc-bridge"
 git -c advice.detachedHead=false checkout --quiet "$COMMIT"
-git apply /backend/rpc-bridge-proton.patch
 make -s build
 
 mkdir -p /backend/out

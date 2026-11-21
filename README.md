@@ -150,7 +150,7 @@ How: the plugin writes `~/.config/environment.d/50-discord-status-relay-proton.c
 sets `PROTON_REMOTE_DEBUG_CMD` for the whole Steam session. Steam reads it at start, so
 **restart Game Mode** after turning the option on or off; the panel says when that's needed.
 Turning it off or uninstalling removes the file. `bridge.exe` is built from source in
-`backend/` with one patch for Proton 11 (see `backend/README.md`).
+`backend/` from a fork with one fix for Proton 11 (see `backend/README.md`).
 
 ## Development
 

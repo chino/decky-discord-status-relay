@@ -314,14 +314,24 @@ async function makeZip(folderName) {
     const target = path.join(OUT, `${folderName}.zip`);
     await fs.rm(target, { force: true });
 
-    const version = await run('tar', ['--version'], { capture: true }).catch(() => '');
-    if (!version.includes('bsdtar')) {
-        warn(`--zip needs bsdtar (libarchive); found: ${version.split('\n')[0] || 'nothing'}`);
+    // libarchive's tar is `tar` on macOS/BSD and Windows, `bsdtar` on most Linux distros.
+    let tar = null;
+    let found = '';
+    for (const candidate of ['bsdtar', 'tar']) {
+        const version = await run(candidate, ['--version'], { capture: true }).catch(() => '');
+        if (version.includes('bsdtar')) {
+            tar = candidate;
+            break;
+        }
+        found ||= version.split('\n')[0];
+    }
+    if (!tar) {
+        warn(`--zip needs bsdtar (libarchive); found: ${found || 'nothing'}`);
         return;
     }
 
     log(`writing out/${folderName}.zip`);
-    await run('tar', ['-a', '-cf', target, '-C', OUT, folderName]);
+    await run(tar, ['-a', '-cf', target, '-C', OUT, folderName]);
 }
 
 // --------------------------------------------------------------------------

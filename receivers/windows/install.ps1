@@ -1,4 +1,4 @@
-# Installs the Discord Presence receiver for the current user and runs it from
+# Installs the Discord Status Relay receiver for the current user and runs it from
 # Task Scheduler: at sign-in, re-checked every 5 minutes (it exits at once if a
 # copy is already running), windowless through `conhost --headless`.
 #
@@ -15,11 +15,11 @@ param(
     [string[]]$Allow = @(),
     [int]$Port = 8920,
     [string]$Token = '',
-    [string]$TaskName = 'Discord Presence Receiver',
-    [string]$Source = 'https://raw.githubusercontent.com/chino/steamdeck-discord-status/relay-hub/receivers/windows/discord-receiver.ps1',
+    [string]$TaskName = 'Discord Status Relay Receiver',
+    [string]$Source = 'https://raw.githubusercontent.com/chino/decky-discord-status-relay/main/receivers/windows/discord-receiver.ps1',
     [switch]$Uninstall
 )
-$RuleName = 'Discord Presence receiver'
+$RuleName = 'Discord Status Relay receiver'
 $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 $ErrorActionPreference = 'Stop'

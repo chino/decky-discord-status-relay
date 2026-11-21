@@ -31,7 +31,7 @@ function Log($m) {
 
 # Single instance.
 $created = $false
-$mutex = [Threading.Mutex]::new($true, 'Local\DiscordPresenceReceiver', [ref]$created)
+$mutex = [Threading.Mutex]::new($true, 'Local\DiscordStatusRelayReceiver', [ref]$created)
 if (-not $created) { exit 0 }
 
 # Keep the log from growing forever.

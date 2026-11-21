@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Discord Presence receiver (advanced): runs on the machine with Discord.
+"""Discord Status Relay receiver (advanced): runs on the machine with Discord.
 
 Accepts connections from the Decky plugin (or any relay) and passes each one into the
 local Discord app. Python 3.8+, standard library only. Linux, macOS and Windows.
@@ -259,7 +259,7 @@ def fingerprint(cert_path):
 
 
 async def main():
-    p = argparse.ArgumentParser(description="Discord Presence receiver (advanced)")
+    p = argparse.ArgumentParser(description="Discord Status Relay receiver (advanced)")
     p.add_argument("--listen", action="append", default=[],
                    help="tcp://, tls://, http:// or https:// address (repeatable); default tcp://0.0.0.0:8920")
     p.add_argument("--token", default=os.environ.get("DISCORD_RECEIVER_TOKEN", ""))

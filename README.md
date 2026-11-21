@@ -1,4 +1,4 @@
-# Discord Presence (Decky plugin)
+# Discord Status Relay (Decky plugin)
 
 Shows the game you're playing in Game Mode as your Discord status, with the game's
 official name and icon when Discord knows it. Discord can run **on the handheld** or
@@ -14,7 +14,7 @@ Discord at all.
    - **Windows**, in an admin PowerShell (installs it to start with Windows and opens the
      firewall for your LAN and Tailscale):
      ```powershell
-     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/chino/steamdeck-discord-status/relay-hub/receivers/windows/install.ps1)))
+     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/chino/decky-discord-status-relay/main/receivers/windows/install.ps1)))
      ```
    - **Linux**, quick and temporary (no install, stops when you close the terminal):
      ```bash
@@ -22,7 +22,7 @@ Discord at all.
      ```
      or with the advanced receiver straight from GitHub:
      ```bash
-     curl -fsSL https://raw.githubusercontent.com/chino/steamdeck-discord-status/relay-hub/receivers/python/discord-receiver.py | python3 -
+     curl -fsSL https://raw.githubusercontent.com/chino/decky-discord-status-relay/main/receivers/python/discord-receiver.py | python3 -
      ```
 3. Start a game. Your Discord profile shows it within a few seconds.
 
@@ -89,7 +89,7 @@ Basic, on Windows:
 
 ```powershell
 # once, elevated: allow the handheld in
-New-NetFirewallRule -DisplayName 'Discord Presence receiver' -Direction Inbound -Action Allow `
+New-NetFirewallRule -DisplayName 'Discord Status Relay receiver' -Direction Inbound -Action Allow `
   -Protocol TCP -LocalPort 8920 -RemoteAddress 192.0.2.20
 # as yourself
 powershell -ExecutionPolicy Bypass -File receivers\windows\install.ps1 -Allow 192.0.2.20 -Token <secret>
@@ -140,16 +140,25 @@ unchanged: as a raw byte stream on TCP/TLS, or in binary WebSocket messages over
 
 ## Windows games under Proton
 
-Their Discord library looks for a Windows named pipe inside the Wine prefix and never reaches
-the plugin's socket. They still get the plugin's "Playing <game>" status. For their own rich
-presence, a bridge such as [wine-discord-ipc-bridge](https://github.com/0e4ef622/wine-discord-ipc-bridge)
-or [rpc-bridge](https://github.com/enderice2/rpc-bridge) has to run in the prefix (not automated yet).
+A Proton game's Discord library writes to a Windows named pipe inside its Wine prefix, which
+never reaches the plugin's socket. With **Rich presence from Proton games** on (the default),
+the plugin ships [rpc-bridge](https://github.com/EnderIce2/rpc-bridge) (MIT) and starts it in
+every Proton prefix, so a game's own status (map, party, timers) shows up instead of just
+"Playing <game>". No per-game launch options.
+
+How: the plugin writes `~/.config/environment.d/50-discord-status-relay-proton.conf`, which
+sets `PROTON_REMOTE_DEBUG_CMD` for the whole Steam session. Steam reads it at start, so
+**restart Game Mode** after turning the option on or off; the panel says when that's needed.
+Turning it off or uninstalling removes the file. `bridge.exe` is built from source in
+`backend/` with one patch for Proton 11 (see `backend/README.md`).
 
 ## Development
 
 ```bash
 pnpm install && pnpm build          # frontend -> dist/
 python3 -u tests/test_hub.py        # hub + receiver tests with a fake Discord (needs openssl)
+python3 -u tests/test_proton_bridge.py   # Proton environment file
+docker build -t dp-backend backend && docker run --rm -v "$PWD/backend:/backend" dp-backend   # bridge.exe
 node scripts/deploy.mjs --zip --no-deploy   # package to out/
 ```
 

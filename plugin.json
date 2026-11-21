@@ -1,5 +1,5 @@
 {
-    "name": "Discord Presence",
+    "name": "Discord Status Relay",
     "author": "chino",
     "api_version": 1,
     "flags": [],
@@ -8,6 +8,6 @@
             "discord"
         ],
         "description": "Shows your current game in Discord, on this device or on another machine running Discord",
-        "image": "https://github.com/chino/steamdeck-discord-status/blob/main/assets/screenshot.png?raw=true"
+        "image": "https://github.com/chino/decky-discord-status-relay/blob/main/assets/screenshot.png?raw=true"
     }
 }

@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "py_modules"))
 import proton_bridge as pb  # noqa: E402
 
-BRIDGE = "/home/deck/homebrew/plugins/DiscordPresence/bin/bridge.exe"
+BRIDGE = "/home/deck/homebrew/plugins/DiscordStatusRelay/bin/bridge.exe"
 SOCKET = "/run/user/1000/discord-ipc-0"
 
 
@@ -25,6 +25,15 @@ class ApplyTests(unittest.TestCase):
         self.assertTrue(pb.apply(False, self.home, BRIDGE, SOCKET))
         self.assertFalse(os.path.exists(self.path))
         self.assertFalse(pb.apply(False, self.home, BRIDGE, SOCKET))
+
+    def test_removes_file_from_earlier_name(self):
+        old = os.path.join(self.home, ".config", "environment.d", "50-discord-presence-proton.conf")
+        os.makedirs(os.path.dirname(old))
+        with open(old, "w") as f:
+            f.write("# Written by the Discord Presence Decky plugin\nX=1\n")
+        self.assertTrue(pb.apply(True, self.home, BRIDGE, SOCKET))
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(self.path))
 
     def test_leaves_foreign_file_alone(self):
         os.makedirs(os.path.dirname(self.path))

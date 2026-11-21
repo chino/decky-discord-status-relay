@@ -668,7 +668,7 @@ class Plugin:
 
     # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
     async def _main(self):
-        decky.logger.info("Starting Discord Presence plugin")
+        decky.logger.info("Starting Discord Status Relay plugin")
 
         await self._start_hub()
         await self._in_thread(self._sync_proton_bridge)
@@ -679,7 +679,7 @@ class Plugin:
 
     # Function called first during the unload process, utilize this to handle your plugin being removed
     async def _unload(self):
-        decky.logger.info("Unloading Discord Presence plugin")
+        decky.logger.info("Unloading Discord Status Relay plugin")
 
         if self.supervisor is not None:
             supervisor = self.supervisor

@@ -13,10 +13,13 @@ reads its environment at start: a change applies after Game Mode restarts.
 import os
 import shlex
 
-CONF_NAME = "50-discord-presence-proton.conf"
+CONF_NAME = "50-discord-status-relay-proton.conf"
 
 # Written at the top of the file; also how we recognise a file we own.
-MARKER = "# Written by the Discord Presence Decky plugin"
+MARKER = "# Written by the Discord Status Relay Decky plugin"
+
+# Files written under the plugin's earlier name, removed when found.
+LEGACY = {"50-discord-presence-proton.conf": "# Written by the Discord Presence Decky plugin"}
 
 
 def conf_path(home):
@@ -44,6 +47,7 @@ def apply(enabled, home, bridge_path, socket_path):
 
     Only ever removes a file carrying our marker, so a hand-written file of the same
     name is left alone."""
+    changed = _remove_legacy(home)
     path = conf_path(home)
     try:
         with open(path) as f:
@@ -53,19 +57,34 @@ def apply(enabled, home, bridge_path, socket_path):
 
     if not enabled:
         if current is None or not current.startswith(MARKER):
-            return False
+            return changed
         os.remove(path)
         return True
 
     wanted = render(bridge_path, socket_path)
     if current == wanted:
-        return False
+        return changed
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         f.write(wanted)
     os.replace(tmp, path)
     return True
+
+
+def _remove_legacy(home):
+    removed = False
+    for name, marker in LEGACY.items():
+        path = os.path.join(home, ".config", "environment.d", name)
+        try:
+            with open(path) as f:
+                ours = f.read().startswith(marker)
+        except FileNotFoundError:
+            continue
+        if ours:
+            os.remove(path)
+            removed = True
+    return removed
 
 
 def steam_environment(proc="/proc"):

@@ -12,6 +12,8 @@ import { BUILD_HASH, VERSION } from 'virtual:build-info';
 import { Actions, ConnectionStatus, Context } from './context';
 import { DEFAULT_DEVICE_NAME } from './api';
 import { FaCheck } from 'react-icons/fa';
+import RelaySettings from './RelaySettings';
+import ProtonSettings from './ProtonSettings';
 
 const QuickAccessPanel: FC<{}> = () => {
     const [state, dispatch] = useContext(Context);
@@ -185,6 +187,8 @@ const QuickAccessPanel: FC<{}> = () => {
                     />
                 </div>
             </PanelSectionRow>
+            <RelaySettings />
+            <ProtonSettings />
             <PanelSectionRow>
                 <ButtonItem layout="below" onClick={() => setShowAdvanced((shown) => !shown)}>
                     {showAdvanced ? 'Hide Advanced Settings' : 'Advanced Settings'}

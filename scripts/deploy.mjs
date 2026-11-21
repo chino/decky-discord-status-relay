@@ -3,9 +3,9 @@
  * Build and deploy this plugin to a Steam Deck.
  *
  * Replaces the decky CLI for local development. That tool exists mainly to run
- * `pnpm build` inside a container and to build a Rust/Docker backend; this
- * plugin has neither a custom backend nor py_modules, so the container buys us
- * nothing and only ships for Linux/macOS.
+ * `pnpm build` inside a container and to build a Docker backend. Here the
+ * backend (rpc-bridge's bridge.exe, see backend/README.md) is built separately
+ * and its backend/out/ is staged as bin/, exactly as the CLI does.
  *
  * The staged layout and the remote install steps match what the CLI produces
  * (see SteamDeckHomebrew/cli src/cli/plugin/{build,deploy}.rs) so the result on
@@ -276,6 +276,15 @@ async function stage(folderName) {
             continue;
         }
         await copyDir(source, path.join(staged, dir));
+    }
+
+    // The CLI runs backend/Dockerfile and ships what it leaves in backend/out as bin/.
+    if (await exists(path.join(ROOT, 'backend', 'Dockerfile'))) {
+        const backendOut = path.join(ROOT, 'backend', 'out');
+        if (!(await exists(path.join(backendOut, 'bridge.exe')))) {
+            fail('backend/out/bridge.exe is missing -- build it first (see backend/README.md)');
+        }
+        await copyDir(backendOut, path.join(staged, 'bin'));
     }
 
     const defaults = path.join(ROOT, 'defaults');

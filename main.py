@@ -10,6 +10,24 @@ import uuid
 import decky
 from settings import SettingsManager
 
+from hub import Config as HubConfig, Hub, parse_target
+import proton_bridge
+
+# Relay settings. The hub owns the Discord socket that games and this plugin connect
+# to, and forwards to the Discord on this device or to a receiver on another machine.
+SETTING_RELAY_MODE = "relay_mode"          # "auto", "local" or "remote"
+SETTING_RELAY_TARGET = "relay_target"      # host, host:port, tcp://, tls://, http://, https://
+SETTING_RELAY_TOKEN = "relay_token"
+SETTING_RELAY_FINGERPRINT = "relay_fingerprint"   # SHA-256, to pin a self-signed certificate
+SETTING_RELAY_SOCKET = "relay_socket"
+RELAY_MODES = ("auto", "local", "remote")
+
+# Rich presence from Windows games under Proton, through rpc-bridge (py_modules/proton_bridge.py).
+SETTING_PROTON_BRIDGE = "proton_bridge"
+
+# Set by the plugin once the hub is up; the plugin's own pipe connects here.
+HUB_SOCKET = None
+
 CLIENT_ID = "1055680235682672682"
 
 # The plugin's icon, shown as the small overlay on the presence.
@@ -30,9 +48,9 @@ SETTING_DISCORD_APPLICATION_ID = "discord_application_id"
 
 # The interval to try repeating the presence update to make sure Discord receives it and maintains
 # the correct presence.
-SUPERVISOR_INTERVAL = 60
+SUPERVISOR_INTERVAL = 15
 # The interval to retry after a failure to ensure the presence is updated correctly.
-SUPERVISOR_RETRY_INTERVAL = 30
+SUPERVISOR_RETRY_INTERVAL = 5
 
 OP_HANDSHAKE = 0
 OP_FRAME = 1
@@ -66,6 +84,9 @@ class Pipe:
 
     @staticmethod
     def get_ipc_file():
+        if HUB_SOCKET and os.path.exists(HUB_SOCKET):
+            return HUB_SOCKET
+
         roots = []
 
         # Look for IPC sockets in the application-specific directories first. This is generic in order
@@ -230,6 +251,7 @@ class Pipe:
 
 class Plugin:
     activity = None
+    hub = None
     pipe = None
     settings = None
     supervisor = None
@@ -329,6 +351,136 @@ class Plugin:
         self._get_settings().setSetting(SETTING_DEVICE_NAME, cleaned)
 
         return cleaned
+
+    # ----- relay hub -----
+
+    def _default_socket(self):
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or DEFAULT_RUNTIME_DIR
+        return os.path.join(runtime, "discord-ipc-0")
+
+    def _relay_settings(self):
+        s = self._get_settings()
+        mode = s.getSetting(SETTING_RELAY_MODE, "auto")
+        return {
+            "mode": mode if mode in RELAY_MODES else "auto",
+            "target": str(s.getSetting(SETTING_RELAY_TARGET, "") or ""),
+            "token": str(s.getSetting(SETTING_RELAY_TOKEN, "") or ""),
+            "fingerprint": str(s.getSetting(SETTING_RELAY_FINGERPRINT, "") or ""),
+            "socket": str(s.getSetting(SETTING_RELAY_SOCKET, "") or "") or self._default_socket(),
+        }
+
+    def _hub_config(self, r):
+        return HubConfig(mode=r["mode"], target=r["target"], token=r["token"],
+                         fingerprint=r["fingerprint"], socket_path=r["socket"])
+
+    async def _start_hub(self):
+        global HUB_SOCKET
+        r = self._relay_settings()
+        hub = Hub(self._hub_config(r), logger=decky.logger, generic_pid=os.getpid())
+        try:
+            await hub.start()
+        except OSError as e:
+            decky.logger.error("Could not start the relay hub on %s: %r", r["socket"], e)
+            return
+        self.hub = hub
+        HUB_SOCKET = r["socket"]
+
+    async def get_relay_settings(self):
+        r = self._relay_settings()
+        r["token"] = "set" if r["token"] else ""   # never echo the secret back to the UI
+        return r
+
+    async def set_relay_settings(self, values):
+        """Saves relay settings. Mode, host, port and token apply to the next connection;
+        a new socket path restarts the hub."""
+        if not isinstance(values, dict):
+            return await self.get_relay_settings()
+        s = self._get_settings()
+        error = ""
+        if values.get("mode") in RELAY_MODES:
+            s.setSetting(SETTING_RELAY_MODE, values["mode"])
+        if isinstance(values.get("target"), str):
+            target = values["target"].strip()
+            try:
+                if target:
+                    parse_target(target)
+                s.setSetting(SETTING_RELAY_TARGET, target)
+            except ValueError as e:
+                error = f"Target not saved: {e}"
+        if isinstance(values.get("fingerprint"), str):
+            s.setSetting(SETTING_RELAY_FINGERPRINT, values["fingerprint"].strip())
+        if isinstance(values.get("token"), str) and values["token"] != "set":
+            s.setSetting(SETTING_RELAY_TOKEN, values["token"].strip())
+        old_socket = self._relay_settings()["socket"]
+        if isinstance(values.get("socket"), str):
+            s.setSetting(SETTING_RELAY_SOCKET, values["socket"].strip())
+
+        r = self._relay_settings()
+        if self.hub is not None:
+            if r["socket"] != old_socket:
+                await self._in_thread(self._sync_proton_bridge)
+                await self.hub.stop()
+                self.hub = None
+                async with self._get_lock():
+                    await self._in_thread(self._drop_pipe)
+                await self._start_hub()
+            else:
+                # Live update, and reconnect open sessions so they use it now.
+                cfg = self.hub.config
+                changed = (cfg.mode, cfg.target, cfg.token, cfg.fingerprint) != \
+                    (r["mode"], r["target"], r["token"], r["fingerprint"])
+                cfg.mode, cfg.target, cfg.token, cfg.fingerprint = r["mode"], r["target"], r["token"], r["fingerprint"]
+                if changed:
+                    for session in list(self.hub.sessions):
+                        session.drop_up()
+        decky.logger.info("Relay settings: mode %s, target %s, socket %s", r["mode"], r["target"], r["socket"])
+        result = await self.get_relay_settings()
+        result["error"] = error
+        return result
+
+    # ----- Proton games (rpc-bridge) -----
+
+    def _bridge_path(self):
+        return os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "bridge.exe")
+
+    def _proton_bridge_enabled(self):
+        return bool(self._get_settings().getSetting(SETTING_PROTON_BRIDGE, True))
+
+    def _sync_proton_bridge(self):
+        """Makes the environment.d file match the setting. Returns True when it changed."""
+        bridge = self._bridge_path()
+        enabled = self._proton_bridge_enabled() and os.path.isfile(bridge)
+        try:
+            changed = proton_bridge.apply(enabled, decky.DECKY_USER_HOME, bridge,
+                                          self._relay_settings()["socket"])
+        except OSError as e:
+            decky.logger.error("Could not update %s: %r", proton_bridge.CONF_NAME, e)
+            return False
+        if changed:
+            decky.logger.info("Proton games: %s %s", "wrote" if enabled else "removed",
+                              proton_bridge.conf_path(decky.DECKY_USER_HOME))
+        return changed
+
+    def _proton_bridge_state(self):
+        enabled = self._proton_bridge_enabled()
+        bridge = self._bridge_path()
+        return {
+            "enabled": enabled,
+            "status": proton_bridge.status(enabled, bridge, os.path.isfile(bridge)),
+        }
+
+    async def get_proton_bridge(self):
+        return await self._in_thread(self._proton_bridge_state)
+
+    async def set_proton_bridge(self, enabled):
+        self._get_settings().setSetting(SETTING_PROTON_BRIDGE, bool(enabled))
+        await self._in_thread(self._sync_proton_bridge)
+        return await self.get_proton_bridge()
+
+    async def get_relay_status(self):
+        if self.hub is None:
+            return "relay not running"
+        return self.hub.describe()
 
     def _app_id_for(self, activity):
         """The Discord application to report as: the one matched for this game,
@@ -516,8 +668,10 @@ class Plugin:
 
     # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
     async def _main(self):
-        decky.logger.info("Starting Discord status plugin")
+        decky.logger.info("Starting Discord Presence plugin")
 
+        await self._start_hub()
+        await self._in_thread(self._sync_proton_bridge)
         await self.is_connected()
 
         self.supervisor = asyncio.create_task(self._supervise())
@@ -525,7 +679,7 @@ class Plugin:
 
     # Function called first during the unload process, utilize this to handle your plugin being removed
     async def _unload(self):
-        decky.logger.info("Unloading Discord status plugin")
+        decky.logger.info("Unloading Discord Presence plugin")
 
         if self.supervisor is not None:
             supervisor = self.supervisor
@@ -540,3 +694,14 @@ class Plugin:
                 pass
 
         await self.disconnect()
+
+        if self.hub is not None:
+            await self.hub.stop()
+            self.hub = None
+
+    # Called when the plugin is uninstalled: don't leave Proton pointing at a missing bridge.
+    async def _uninstall(self):
+        try:
+            proton_bridge.apply(False, decky.DECKY_USER_HOME, self._bridge_path(), "")
+        except OSError as e:
+            decky.logger.error("Could not remove %s: %r", proton_bridge.CONF_NAME, e)

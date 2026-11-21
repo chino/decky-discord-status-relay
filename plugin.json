@@ -1,11 +1,13 @@
 {
-    "name": "Discord Status",
-    "author": "Deceptacle",
+    "name": "Discord Presence",
+    "author": "chino",
     "api_version": 1,
     "flags": [],
     "publish": {
-        "tags": ["discord"],
-        "description": "Displays current Steam Deck game in Discord",
-        "image": "https://github.com/andrewburgess/steamdeck-discord-status/blob/main/assets/screenshot.png?raw=true"
+        "tags": [
+            "discord"
+        ],
+        "description": "Shows your current game in Discord, on this device or on another machine running Discord",
+        "image": "https://github.com/chino/steamdeck-discord-status/blob/main/assets/screenshot.png?raw=true"
     }
 }

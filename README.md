@@ -1,70 +1,167 @@
-# Steam Deck Discord Status
+# Discord Presence (Decky plugin)
 
-> [!WARNING]
-> This project is archived and no longer maintained. v1.6.0 is the final release. For a more
-> feature-rich and actively maintained alternative, check out
-> [Deckcord](https://github.com/marios8543/Deckcord) or
-> [Steamcord](https://github.com/Necrosiak/Steamcord).
+Shows the game you're playing in Game Mode as your Discord status, with the game's
+official name and icon when Discord knows it. Discord can run **on the handheld** or
+on **another machine**, such as your desktop PC, so the handheld doesn't have to run
+Discord at all.
 
-Updates Discord Rich Presence with the currently running game while on Steam Deck.
+## Quick setup
 
-## How to Use
+1. **On the handheld:** install the plugin (until it is in the Decky store: Decky settings, Developer, *Install plugin from URL*, using a release zip), open it from the quick-access menu, and set
+   **Target** to your PC's address (its LAN IP, hostname or Tailscale name). That's it if
+   Discord runs on the handheld instead: leave Target empty.
+2. **On the machine running Discord**, start a receiver:
+   - **Windows**, in an admin PowerShell (installs it to start with Windows and opens the
+     firewall for your LAN and Tailscale):
+     ```powershell
+     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/chino/steamdeck-discord-status/relay-hub/receivers/windows/install.ps1)))
+     ```
+   - **Linux**, quick and temporary (no install, stops when you close the terminal):
+     ```bash
+     socat TCP-LISTEN:8920,fork,reuseaddr UNIX-CONNECT:$XDG_RUNTIME_DIR/discord-ipc-0
+     ```
+     or with the advanced receiver straight from GitHub:
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/chino/steamdeck-discord-status/relay-hub/receivers/python/discord-receiver.py | python3 -
+     ```
+3. Start a game. Your Discord profile shows it within a few seconds.
 
-Discord must be running in order for this plugin to work. You should have Discord installed as a
-Flatpak and setup as a Non-Steam Game that can be launched from Steam. This will ensure the plugin
-can detect when Discord is running.
+On a home LAN or your own tailnet, that's all you need. Tokens, TLS and permanent Linux
+installs are covered below.
 
-### Alternative Discord Clients
+## What it does
 
-Other Discord clients such as Vencord or Vesktop are not officially supported. A workaround can be
-found here https://github.com/andrewburgess/steamdeck-discord-status/issues/13 which should enable
-those to work.
+- **Reports the running game**, including non-Steam shortcuts (Heroic, emulators, ...).
+  Discord shows "Playing <game>" using the game's own Discord application when one exists,
+  otherwise a fallback application with the game name underneath.
+- **Owns the Discord socket** (`$XDG_RUNTIME_DIR/discord-ipc-0`). Native Linux games with
+  their own rich presence connect to the plugin, which passes them through.
+- **Avoids double statuses:** while a game shows its own rich presence, the plugin
+  withholds its generic one and puts it back when the game's session ends.
+- **Routes to a Discord:**
+  - *Automatic* (default): the Discord app on this device if it's running, otherwise the
+    configured host.
+  - *This device only* or *Another machine only*.
+- **Survives drops:** if Discord or the network goes away, clients stay connected; the plugin
+  answers them itself, reconnects (backoff up to 10 s), and replays the handshake and last status.
+  Remote links use TCP keepalive, so a machine that vanishes is noticed in about 30 s.
+- **Switches live:** in Automatic mode, starting Discord on the handheld moves statuses to it
+  within a few seconds, and quitting it moves them back to the target.
+- **Re-asserts the status** every 15 s, and retries after 5 s on failure.
+- **Optional shared token** so the receiver only accepts your handheld.
 
-A PR to add support is also acceptable if someone wants to add that
+Settings live in the quick-access panel: destination, target, token, certificate fingerprint, device name
+("on ROG Ally" instead of "on Steam Deck"), plus a live relay status line.
 
-### Device Name
+## Target
 
-Your presence reads `on Steam Deck` by default. SteamOS runs on plenty of other hardware now, so the
-quick access panel has a **Device Name** field. This can be used to customize the device name.
-Clearing the field puts it back to `Steam Deck`.
+One field says where statuses go. The format picks the transport:
 
-### Discord Application ID (advanced)
+| Target | Transport |
+|---|---|
+| `pc.lan`, `100.64.0.5` | plain TCP on the default port **8920** |
+| `pc.lan:9000`, `tcp://pc.lan:9000` | plain TCP |
+| `tls://pc.lan:8921` | TLS |
+| `http://pc.lan:8922/discord` | WebSocket over HTTP (`ws://` also accepted) |
+| `https://pc.example.ts.net/discord` | WebSocket over HTTPS (`wss://` also accepted) |
 
-If you want to have a custom fallback application where you can control the main activity name and
-some of the image content, you can open up the Advanced Settings and enter the Client ID of your
-Discord application.
+The optional **token** is sent as a first line `AUTH <token>` on TCP/TLS, or as an
+`Authorization: Bearer <token>` header over HTTP(S). For a self-signed certificate, paste its
+SHA-256 **fingerprint** into the plugin to pin it; otherwise certificates are verified normally.
 
-Create one in the [Discord developer portal](https://discord.com/developers/applications), name it
-whatever you want the main activity line to read, and paste its ID in. Leave the field blank to go
-back to this plugin's application. This will only affect games that cannot be detected from the list
-that Discord publishes.
+## Receivers (for Discord on another machine)
+
+A receiver runs on the machine with Discord, accepts the plugin's connection and passes it
+into the local Discord.
+
+| | Basic: `receivers/windows/discord-receiver.ps1` | Advanced: `receivers/python/discord-receiver.py` |
+|---|---|---|
+| Runs on | Windows (PowerShell 5.1, built in) | Linux, macOS, Windows (Windows untested) |
+| Install | nothing | Python 3.8+, standard library only |
+| Listeners | plain TCP | `tcp://`, `tls://`, `http://` (WebSocket), `https://` (WebSocket), several at once |
+| TLS | via a proxy in front (see below) | built in: `--cert/--key`, or `--self-signed DIR` (prints the fingerprint) |
+| Token | `-Token` | `--token` or `DISCORD_RECEIVER_TOKEN` |
+| Address allow-list | `-Allow` (optional) | `--allow` (optional) |
+| Health check | | plain `GET` on the HTTP path returns 200 |
+| Runs as | Task Scheduler task for your user (`install.ps1`): at sign-in, re-checked every 5 min, no window, single instance | systemd user unit (`discord-receiver.service`), or by hand |
+
+Basic, on Windows:
+
+```powershell
+# once, elevated: allow the handheld in
+New-NetFirewallRule -DisplayName 'Discord Presence receiver' -Direction Inbound -Action Allow `
+  -Protocol TCP -LocalPort 8920 -RemoteAddress 192.0.2.20
+# as yourself
+powershell -ExecutionPolicy Bypass -File receivers\windows\install.ps1 -Allow 192.0.2.20 -Token <secret>
+```
+
+Advanced, on Linux (self-signed TLS plus a token):
+
+```bash
+install -Dm755 receivers/python/discord-receiver.py ~/.local/bin/discord-receiver.py
+install -Dm644 receivers/python/discord-receiver.service ~/.config/systemd/user/discord-receiver.service
+systemctl --user edit discord-receiver
+#   [Service]
+#   Environment=DISCORD_RECEIVER_TOKEN=<secret>
+#   Environment="RECEIVER_ARGS=--listen tls://0.0.0.0:8921 --self-signed %h/.config/discord-receiver"
+systemctl --user enable --now discord-receiver
+journalctl --user -u discord-receiver | grep fingerprint   # paste into the plugin
+```
+
+Quick test without either: `socat TCP-LISTEN:8920,fork,range=192.0.2.20/32 UNIX-CONNECT:$XDG_RUNTIME_DIR/discord-ipc-0`
+(Linux, no token).
+
+## Security and TLS
+
+Authentication is optional. On a home LAN or a tailnet only you use, most people skip it.
+
+- **Tailscale and WireGuard already encrypt everything** between your devices, so plain `tcp://`
+  to a tailnet address is private, token included.
+- **On any other network, a token alone isn't enough:** over plain `tcp://` or `http://` it
+  travels in the clear and anyone watching the network can read it. Add encryption:
+  - *Advanced receiver, self-signed:* `--listen tls://0.0.0.0:8921 --self-signed DIR`, then target
+    `tls://pc:8921` with the printed fingerprint pinned in the plugin.
+  - *Real certificate from Tailscale* (`tailscale serve` is tailnet-only; `tailscale funnel` would
+    publish it to the internet). In front of the advanced receiver's HTTP listener:
+    `tailscale serve --bg --https=8443 http://127.0.0.1:8922` and target
+    `https://pc.<tailnet>.ts.net:8443/discord`. In front of the basic receiver's raw TCP:
+    `tailscale serve --bg --tls-terminated-tcp=8443 tcp://127.0.0.1:8920` and target
+    `tls://pc.<tailnet>.ts.net:8443`. Bind the receiver to `127.0.0.1` so only the proxy reaches it.
+  - *Any reverse proxy* (Caddy, nginx, Traefik) that can pass WebSockets works the same way with
+    the HTTP listener.
+- **Only use Funnel or a public port with a token**, and prefer TLS.
+- If verifying a real certificate fails on the handheld (some Python builds lack a CA bundle), pin
+  its fingerprint instead.
+
+### Protocol
+
+Discord IPC frames (8-byte little-endian header with opcode and length, then JSON) carried
+unchanged: as a raw byte stream on TCP/TLS, or in binary WebSocket messages over HTTP(S).
+
+## Windows games under Proton
+
+Their Discord library looks for a Windows named pipe inside the Wine prefix and never reaches
+the plugin's socket. They still get the plugin's "Playing <game>" status. For their own rich
+presence, a bridge such as [wine-discord-ipc-bridge](https://github.com/0e4ef622/wine-discord-ipc-bridge)
+or [rpc-bridge](https://github.com/enderice2/rpc-bridge) has to run in the prefix (not automated yet).
 
 ## Development
 
-Requires Node (see `mise.toml`) and pnpm.
-
-Copy `deck.example.json` to `deck.json` and fill in your deck's hostname and sudo password. SSH uses
-key auth, so make sure `ssh deck@<host>` works first.
-
-```sh
-pnpm install
-pnpm deck          # build, ship to the deck, restart decky
-pnpm deck:watch    # same, on every change to src/ or main.py
-pnpm zip           # build out/<plugin>.zip for a manual install, no deploy
+```bash
+pnpm install && pnpm build          # frontend -> dist/
+python3 -u tests/test_hub.py        # hub + receiver tests with a fake Discord (needs openssl)
+node scripts/deploy.mjs --zip --no-deploy   # package to out/
 ```
 
-`pnpm deck` accepts `--no-build` (redeploy the current `dist/`), `--no-restart` (leave the running
-plugin alone), `--full-restart` and `--zip`.
+The backend is `main.py` plus `py_modules/hub.py`. The hub has no Decky imports, so it's
+tested on its own.
 
-By default a deploy reloads _just this plugin_ through decky rather than restarting `plugin_loader`,
-which would tear down the quick access menu and close whatever panel you have open. That path talks
-to Steam's CEF debugging port (8081, override with `cefPort` in `deck.json`) and needs decky's
-developer mode switched on. If it is unavailable the script says so and falls back to a full restart
-on its own; `--full-restart` forces one.
+## Notes
 
-Backend changes apply the moment the reload finishes. A panel that is already on screen keeps
-rendering the React tree it mounted from the previous bundle, so back out of it and reopen to pick
-up frontend changes.
+- Discord silently ignores commands sent before it answers the handshake (READY).
+- The "Playing ___" line is the Discord application's name; Discord doesn't match by text.
+  Games Discord detects on PC have public application IDs, which the plugin reuses.
 
-> Use `pnpm deck`, not `pnpm deploy` — `deploy` is a built-in pnpm command and would not run the
-> script.
+## License
+
+BSD 3-Clause, see `LICENSE`.

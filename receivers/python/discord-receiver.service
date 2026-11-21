@@ -1,0 +1,22 @@
+# systemd user unit for a Linux machine running Discord. Install:
+#   install -Dm755 discord-receiver.py ~/.local/bin/discord-receiver.py
+#   install -Dm644 discord-receiver.service ~/.config/systemd/user/discord-receiver.service
+#   systemctl --user edit discord-receiver
+#   systemctl --user enable --now discord-receiver
+#
+# In the override, for example:
+#   [Service]
+#   Environment=DISCORD_RECEIVER_TOKEN=change-me
+#   Environment="RECEIVER_ARGS=--listen tls://0.0.0.0:8921 --self-signed %h/.config/discord-receiver --allow 192.0.2.20"
+[Unit]
+Description=Receive Discord rich presence from another machine
+After=network-online.target
+
+[Service]
+Environment="RECEIVER_ARGS=--listen tcp://0.0.0.0:8920"
+ExecStart=/usr/bin/python3 -u %h/.local/bin/discord-receiver.py $RECEIVER_ARGS
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
